@@ -82,6 +82,21 @@ body {
 
 .msg.ai {
   color: #555555;
+  padding: 14px 16px;
+  border-left: 4px solid var(--loreal-gold);
+  background: #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
+}
+
+.msg-question {
+  color: var(--loreal-black);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.msg-answer {
+  white-space: pre-line;
 }
 
 /* input row */

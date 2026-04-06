@@ -11,6 +11,10 @@ const SYSTEM_PROMPT =
 const OFF_TOPIC_REPLY =
   "I can only help with L'Oreal beauty topics. Please ask about L'Oreal products, routines, or recommendations.";
 
+const workerURL = "https://loreal.tukovc37.workers.dev/";
+
+let userName = "";
+
 /* Store conversation so the chatbot remembers context */
 const messages = [
   {
@@ -20,7 +24,7 @@ const messages = [
 ];
 
 /* Adds one message to the chat UI */
-function addMessage(role, text) {
+function addMessage(role, text, latestQuestion = "") {
   const messageEl = document.createElement("div");
   messageEl.classList.add("msg");
 
@@ -29,11 +33,63 @@ function addMessage(role, text) {
     messageEl.textContent = `You: ${text}`;
   } else {
     messageEl.classList.add("ai");
-    messageEl.textContent = `L'Oreal Advisor: ${text}`;
+
+    if (latestQuestion) {
+      const questionEl = document.createElement("div");
+      questionEl.classList.add("msg-question");
+      questionEl.textContent = `You asked: ${latestQuestion}`;
+      messageEl.appendChild(questionEl);
+    }
+
+    const answerEl = document.createElement("div");
+    answerEl.classList.add("msg-answer");
+    answerEl.textContent = `L'Oreal Advisor: ${text}`;
+    messageEl.appendChild(answerEl);
   }
 
   chatWindow.appendChild(messageEl);
   chatWindow.scrollTop = chatWindow.scrollHeight;
+}
+
+/* Capture a user's name so future replies can stay personal */
+function extractName(text) {
+  const namePatterns = [
+    /\bmy name is\s+([A-Za-z][A-Za-z' -]{0,39})\b/i,
+    /\bi am\s+([A-Za-z][A-Za-z' -]{0,39})\b/i,
+    /\bi'm\s+([A-Za-z][A-Za-z' -]{0,39})\b/i,
+  ];
+
+  for (const pattern of namePatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return "";
+}
+
+/* Build the message list sent to the worker */
+function buildRequestMessages() {
+  const requestMessages = [
+    {
+      role: "system",
+      content: SYSTEM_PROMPT,
+    },
+  ];
+
+  if (userName) {
+    requestMessages.push({
+      role: "system",
+      content: `The user's name is ${userName}. Use it naturally when responding.`,
+    });
+  }
+
+  for (const message of messages.slice(1)) {
+    requestMessages.push(message);
+  }
+
+  return requestMessages;
 }
 
 /* Basic topic check to keep answers focused on L'Oreal beauty requests */
@@ -80,9 +136,14 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  const detectedName = extractName(question);
+  if (detectedName) {
+    userName = detectedName;
+  }
+
   if (!isLorealBeautyQuestion(question)) {
     addMessage("user", question);
-    addMessage("assistant", OFF_TOPIC_REPLY);
+    addMessage("assistant", OFF_TOPIC_REPLY, question);
     userInput.value = "";
     return;
   }
@@ -99,44 +160,39 @@ chatForm.addEventListener("submit", async (event) => {
   // Clear the input right away for better UX
   userInput.value = "";
 
-  // Use the key from secrets.js if it exists
-  if (typeof OPENAI_API_KEY === "undefined" || !OPENAI_API_KEY) {
-    addMessage(
-      "assistant",
-      "Missing API key. Add OPENAI_API_KEY in secrets.js to continue.",
-    );
-    return;
-  }
-
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch(workerURL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o",
-        messages: messages,
+        messages: buildRequestMessages(),
       }),
     });
 
     if (!response.ok) {
-      throw new Error(
-        "Request failed. Please check your API key and try again.",
-      );
+      throw new Error("Request failed. Please try again.");
     }
 
     const data = await response.json();
-    const aiReply = data.choices[0].message.content;
+    const aiReply = data?.choices?.[0]?.message?.content;
+
+    if (!aiReply) {
+      throw new Error("The worker returned an unexpected response.");
+    }
 
     // Show assistant reply in the chat and keep it in memory for future turns
-    addMessage("assistant", aiReply);
+    addMessage("assistant", aiReply, question);
     messages.push({
       role: "assistant",
       content: aiReply,
     });
   } catch (error) {
-    addMessage("assistant", `Sorry, something went wrong: ${error.message}`);
+    addMessage(
+      "assistant",
+      `Sorry, something went wrong: ${error.message}`,
+      question,
+    );
   }
 });
